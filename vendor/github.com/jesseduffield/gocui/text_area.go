@@ -71,6 +71,7 @@ func contentToCells(content string, autoWrapWidth int) ([]TextAreaCell, []int) {
 	currentLineWidth := 0
 	indexOfLastWhitespace := -1
 	var footNoteMatcher footNoteMatcher
+	var trailerMatcher trailerMatcher
 
 	cells := stringToTextAreaCells(content)
 	y := 0
@@ -94,11 +95,12 @@ func contentToCells(content string, autoWrapWidth int) ([]TextAreaCell, []int) {
 			indexOfLastWhitespace = -1
 			currentLineWidth = 0
 			footNoteMatcher.reset()
+			trailerMatcher.reset()
 		} else {
 			currentLineWidth += c.width
 			if c.char == " " && !footNoteMatcher.isFootNote() {
 				indexOfLastWhitespace = currentPos + 1
-			} else if autoWrapWidth > 0 && currentLineWidth > autoWrapWidth && indexOfLastWhitespace >= 0 {
+			} else if autoWrapWidth > 0 && currentLineWidth > autoWrapWidth && indexOfLastWhitespace >= 0 && !trailerMatcher.isTrailer() {
 				wrapAt := indexOfLastWhitespace
 				appendCellsSinceLineStart(wrapAt)
 				contentIndex := cells[wrapAt].contentIndex
@@ -115,6 +117,7 @@ func contentToCells(content string, autoWrapWidth int) ([]TextAreaCell, []int) {
 			}
 
 			footNoteMatcher.addCharacter(c.char)
+			trailerMatcher.addCharacter(c.char)
 		}
 	}
 
@@ -124,6 +127,8 @@ func contentToCells(content string, autoWrapWidth int) ([]TextAreaCell, []int) {
 }
 
 var footNoteRe = regexp.MustCompile(`^\[\d+\]:\s*$`)
+
+var trailerRe = regexp.MustCompile(`^Co-authored-by:\s*`)
 
 type footNoteMatcher struct {
 	lineStr        strings.Builder
@@ -163,6 +168,44 @@ func (self *footNoteMatcher) isFootNote() bool {
 }
 
 func (self *footNoteMatcher) reset() {
+	self.lineStr.Reset()
+	self.didFailToMatch = false
+}
+
+type trailerMatcher struct {
+	lineStr        strings.Builder
+	didFailToMatch bool
+}
+
+func (self *trailerMatcher) addCharacter(chr string) {
+	if self.didFailToMatch {
+		// don't bother tracking the rune if we know it can't possibly match any more
+		return
+	}
+
+	if self.lineStr.Len() == 0 && (chr == " " || chr == "\t") {
+		// if the first character is whitespace, it can't be a trailer key
+		self.didFailToMatch = true
+		return
+	}
+
+	self.lineStr.WriteString(chr)
+}
+
+func (self *trailerMatcher) isTrailer() bool {
+	if self.didFailToMatch {
+		return false
+	}
+
+	if trailerRe.MatchString(self.lineStr.String()) {
+		return true
+	}
+
+	self.didFailToMatch = true
+	return false
+}
+
+func (self *trailerMatcher) reset() {
 	self.lineStr.Reset()
 	self.didFailToMatch = false
 }
